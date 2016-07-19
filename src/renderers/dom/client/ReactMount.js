@@ -612,12 +612,16 @@ var ReactMount = {
       'mountComponentIntoNode(...): Target container is not valid.'
     );
 
+    var checksumFailed = false;
+    var FAILED_CHECKSUM_ATTRIBUTE = 'react-failed-checksum-element';
+
     if (shouldReuseMarkup) {
       var rootElement = getReactRootElementInContainer(container);
       if (ReactMarkupChecksum.canReuseMarkup(markup, rootElement)) {
         ReactDOMComponentTree.precacheNode(instance, rootElement);
         return;
       } else {
+        checksumFailed = true;
         var checksum = rootElement.getAttribute(
           ReactMarkupChecksum.CHECKSUM_ATTR_NAME
         );
@@ -650,6 +654,24 @@ var ReactMount = {
         }
 
         var diffIndex = firstDifferenceIndex(normalizedMarkup, rootMarkup);
+
+        // add a marker to the element that contains the difference
+        var firstPartOfString = normalizedMarkup.slice(0, diffIndex);
+        const lastCloseBracket = firstPartOfString.lastIndexOf('>');
+        const lastOpenBracket = firstPartOfString.lastIndexOf('<');
+
+        if (lastOpenBracket > lastCloseBracket) {
+          // the difference is inside a tag
+          var upToBracket = normalizedMarkup.slice(0, lastOpenBracket);
+          var afterBracket = normalizedMarkup.slice(lastOpenBracket);
+          markup = upToBracket + marketAttribute + afterBracket;
+        } else {
+          // the difference is in test content
+          var upToBracket = normalizedMarkup.slice(0, lastCloseBracket);
+          var afterBracket = normalizedMarkup.slice(lastCloseBracket);
+          markup = upToBracket + ' ' + FAILED_CHECKSUM_ATTRIBUTE + ' ' + afterBracket;
+        }
+
         var difference = ' (client) ' +
           normalizedMarkup.substring(diffIndex - 20, diffIndex + 20) +
           '\n (server) ' + rootMarkup.substring(diffIndex - 20, diffIndex + 20);
@@ -700,6 +722,21 @@ var ReactMount = {
     } else {
       setInnerHTML(container, markup);
       ReactDOMComponentTree.precacheNode(instance, container.firstChild);
+
+      if (__DEV__) {
+        if (checksumFailed) {
+          var checksumFailedElement = document.querySelector('[' + FAILED_CHECKSUM_ATTRIBUTE + ']');
+
+          if (checksumFailedElement) {
+            checksumFailedElement.removeAttribute(FAILED_CHECKSUM_ATTRIBUTE);
+            setTimeout(function() {
+              // log on next tick, otherwise can just print a JavaScript object
+              // e.g. if Chrome dev tools is in the element tree tab
+              console.log('Checksum failed for element:', checksumFailedElement);
+            });
+          }
+        }
+      }
     }
 
     if (__DEV__) {
